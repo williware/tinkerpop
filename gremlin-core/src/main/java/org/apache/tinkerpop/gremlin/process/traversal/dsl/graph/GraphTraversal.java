@@ -37,7 +37,9 @@ import org.apache.tinkerpop.gremlin.process.traversal.lambda.PredicateTraverser;
 import org.apache.tinkerpop.gremlin.process.traversal.lambda.TrueTraversal;
 import org.apache.tinkerpop.gremlin.process.traversal.step.ByModulating;
 import org.apache.tinkerpop.gremlin.process.traversal.step.FromToModulating;
+import org.apache.tinkerpop.gremlin.process.traversal.step.FromToModulating;
 import org.apache.tinkerpop.gremlin.process.traversal.step.Mutating;
+import org.apache.tinkerpop.gremlin.process.traversal.step.MutatingContainerHolder;
 import org.apache.tinkerpop.gremlin.process.traversal.step.TimesModulating;
 import org.apache.tinkerpop.gremlin.process.traversal.step.TraversalOptionParent;
 import org.apache.tinkerpop.gremlin.process.traversal.step.branch.BranchStep;
@@ -91,6 +93,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.step.map.MeanGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.MeanLocalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.MinGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.MinLocalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.MutatingStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.NoOpBarrierStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.OrderGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.OrderLocalStep;
@@ -130,6 +133,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.SubgraphSt
 import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.TraversalSideEffectStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.TreeSideEffectStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.HasContainer;
+import org.apache.tinkerpop.gremlin.process.traversal.step.util.MutatingContainer;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.Tree;
 import org.apache.tinkerpop.gremlin.process.traversal.traverser.util.TraverserSet;
 import org.apache.tinkerpop.gremlin.process.traversal.util.TraversalHelper;
@@ -985,7 +989,14 @@ public interface GraphTraversal<S, E> extends Traversal<S, E> {
      */
     public default GraphTraversal<S, Vertex> addV(final String vertexLabel) {
         this.asAdmin().getBytecode().addStep(Symbols.addV, vertexLabel);
-        return this.asAdmin().addStep(new AddVertexStep<>(this.asAdmin(), vertexLabel));
+
+        final Step endStep = this.asAdmin().getEndStep();
+        final MutatingContainerHolder holder = (endStep instanceof MutatingContainerHolder) ?
+                (MutatingContainerHolder) endStep : new MutatingStep<>(this.asAdmin());
+
+        final MutatingContainer container = new MutatingContainer(MutatingContainer.Operation.ADD_V, holder, T.label, vertexLabel);
+        holder.addMutatingContainer(container);
+        return endStep == holder ? (GraphTraversal) this : this.asAdmin().addStep((Step) holder);
     }
 
     /**
@@ -997,7 +1008,14 @@ public interface GraphTraversal<S, E> extends Traversal<S, E> {
      */
     public default GraphTraversal<S, Vertex> addV() {
         this.asAdmin().getBytecode().addStep(Symbols.addV);
-        return this.asAdmin().addStep(new AddVertexStep<>(this.asAdmin(), null));
+
+        final Step endStep = this.asAdmin().getEndStep();
+        final MutatingContainerHolder holder = (endStep instanceof MutatingContainerHolder) ?
+                (MutatingContainerHolder) endStep : new MutatingStep<>(this.asAdmin());
+
+        final MutatingContainer container = new MutatingContainer(MutatingContainer.Operation.ADD_V, holder);
+        holder.addMutatingContainer(container);
+        return endStep == holder ? (GraphTraversal) this : this.asAdmin().addStep((Step) holder);
     }
 
     /**
@@ -1023,7 +1041,17 @@ public interface GraphTraversal<S, E> extends Traversal<S, E> {
      */
     public default GraphTraversal<S, Edge> addE(final String edgeLabel) {
         this.asAdmin().getBytecode().addStep(Symbols.addE, edgeLabel);
-        return this.asAdmin().addStep(new AddEdgeStep<>(this.asAdmin(), edgeLabel));
+
+        final Step endStep = this.asAdmin().getEndStep();
+        final MutatingContainerHolder holder = (endStep instanceof MutatingContainerHolder) ?
+                (MutatingContainerHolder) endStep : new MutatingStep<>(this.asAdmin());
+
+        final MutatingContainer container = new MutatingContainer(MutatingContainer.Operation.ADD_E, holder);
+        container.setEdgeLabel(edgeLabel);
+        holder.addMutatingContainer(container);
+        return endStep == holder ? (GraphTraversal) this : this.asAdmin().addStep((Step) holder);
+
+        //return this.asAdmin().addStep(new AddEdgeStep<>(this.asAdmin(), edgeLabel));
     }
 
     /**
@@ -1036,7 +1064,13 @@ public interface GraphTraversal<S, E> extends Traversal<S, E> {
      */
     public default GraphTraversal<S, E> to(final String toStepLabel) {
         this.asAdmin().getBytecode().addStep(Symbols.to, toStepLabel);
-        ((FromToModulating) this.asAdmin().getEndStep()).addTo(toStepLabel);
+
+        final Step endStep = this.asAdmin().getEndStep();
+        if (endStep instanceof MutatingContainerHolder) {
+            ((MutatingContainerHolder) endStep).getLastMutatingContainer().setInVLabel(toStepLabel);
+        } else {
+            ((FromToModulating) this.asAdmin().getEndStep()).addTo(toStepLabel);
+        }
         return this;
     }
 
@@ -1050,7 +1084,13 @@ public interface GraphTraversal<S, E> extends Traversal<S, E> {
      */
     public default GraphTraversal<S, E> from(final String fromStepLabel) {
         this.asAdmin().getBytecode().addStep(Symbols.from, fromStepLabel);
-        ((FromToModulating) this.asAdmin().getEndStep()).addFrom(fromStepLabel);
+
+        final Step endStep = this.asAdmin().getEndStep();
+        if (endStep instanceof MutatingContainerHolder) {
+            ((MutatingContainerHolder) endStep).getLastMutatingContainer().setOutVLabel(fromStepLabel);
+        } else {
+            ((FromToModulating) this.asAdmin().getEndStep()).addFrom(fromStepLabel);
+        }
         return this;
     }
 
@@ -1065,6 +1105,11 @@ public interface GraphTraversal<S, E> extends Traversal<S, E> {
      */
     public default GraphTraversal<S, E> to(final Traversal<E, Vertex> toVertex) {
         this.asAdmin().getBytecode().addStep(Symbols.to, toVertex);
+
+
+        // TODO: trigger explode here if this happens?
+
+
         ((FromToModulating) this.asAdmin().getEndStep()).addTo(toVertex.asAdmin());
         return this;
     }
@@ -1080,6 +1125,11 @@ public interface GraphTraversal<S, E> extends Traversal<S, E> {
      */
     public default GraphTraversal<S, E> from(final Traversal<E, Vertex> fromVertex) {
         this.asAdmin().getBytecode().addStep(Symbols.from, fromVertex);
+
+
+        // TODO: trigger explode here if this happens?
+
+
         ((FromToModulating) this.asAdmin().getEndStep()).addFrom(fromVertex.asAdmin());
         return this;
     }
@@ -2058,7 +2108,7 @@ public interface GraphTraversal<S, E> extends Traversal<S, E> {
         // if it can be detected that this call to property() is related to an addV/E() then we can attempt to fold
         // the properties into that step to gain an optimization for those graphs that support such capabilities.
         final Step endStep = this.asAdmin().getEndStep();
-        if ((endStep instanceof AddVertexStep || endStep instanceof AddEdgeStep || endStep instanceof AddVertexStartStep) &&
+        if ((endStep instanceof MutatingStep || endStep instanceof AddVertexStep || endStep instanceof AddEdgeStep || endStep instanceof AddVertexStartStep) &&
                 keyValues.length == 0 && null == cardinality) {
             ((Mutating) endStep).addPropertyMutations(key, value);
         } else {
@@ -2419,7 +2469,7 @@ public interface GraphTraversal<S, E> extends Traversal<S, E> {
     ///////////////////// UTILITY STEPS /////////////////////
 
     /**
-     * A step modulator that provides a lable to the step that can be accessed later in the traversal by other steps.
+     * A step modulator that provides a label to the step that can be accessed later in the traversal by other steps.
      *
      * @param stepLabel  the name of the step
      * @param stepLabels additional names for the label
